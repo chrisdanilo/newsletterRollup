@@ -2,6 +2,15 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function updateSession(request: NextRequest) {
+  // Skip Supabase auth entirely for public/demo routes
+  const publicPaths = ['/', '/demo']
+  if (
+    publicPaths.includes(request.nextUrl.pathname) ||
+    !process.env.NEXT_PUBLIC_SUPABASE_URL
+  ) {
+    return NextResponse.next({ request })
+  }
+
   let supabaseResponse = NextResponse.next({
     request,
   })
