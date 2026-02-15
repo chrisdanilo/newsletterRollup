@@ -4,6 +4,7 @@ import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import toast from "react-hot-toast";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 export default function Home() {
   const [mode, setMode] = useState<"landing" | "signup" | "login">("landing");
@@ -230,12 +231,20 @@ export default function Home() {
           Stop drowning in newsletter emails. NewsletterRollup aggregates every newsletter you receive
           and delivers a single AI-summarized digest every night — so you never miss what matters.
         </p>
-        <button
-          onClick={() => setMode("signup")}
-          className="bg-blue-600 text-white px-8 py-4 rounded-xl font-bold text-lg hover:bg-blue-700 shadow-lg transition-colors"
-        >
-          Get started for free
-        </button>
+        <div className="flex flex-col sm:flex-row gap-4 justify-center">
+          <button
+            onClick={() => setMode("signup")}
+            className="bg-blue-600 text-white px-8 py-4 rounded-xl font-bold text-lg hover:bg-blue-700 shadow-lg transition-colors"
+          >
+            Get started for free
+          </button>
+          <Link
+            href="/demo"
+            className="border-2 border-blue-600 text-blue-600 px-8 py-4 rounded-xl font-bold text-lg hover:bg-blue-50 transition-colors"
+          >
+            See a live demo →
+          </Link>
+        </div>
         <p className="mt-4 text-sm text-gray-500">No credit card required</p>
       </section>
 
