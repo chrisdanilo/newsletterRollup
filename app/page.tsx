@@ -37,15 +37,24 @@ export default function Home() {
         process.env.NEXT_PUBLIC_APP_DOMAIN || "usebrief.me"
       }`;
 
-      const { error: profileError } = await supabase.from("profiles").insert({
-        id: authData.user.id,
-        email: formData.email,
-        first_name: formData.firstName,
-        last_name: formData.lastName,
-        forwarding_address: forwardingAddress,
+      // Use service role API route to insert profile, since the user's session
+      // may not be active yet if email confirmation is required
+      const res = await fetch("/api/create-profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: authData.user.id,
+          email: formData.email,
+          first_name: formData.firstName,
+          last_name: formData.lastName,
+          forwarding_address: forwardingAddress,
+        }),
       });
 
-      if (profileError) throw profileError;
+      if (!res.ok) {
+        const { error } = await res.json();
+        throw new Error(error || "Failed to create profile");
+      }
 
       toast.success("Account created! Check your email to verify.");
       router.push("/dashboard");
