@@ -94,7 +94,7 @@ export default function Home() {
                   value={formData.firstName}
                   onChange={e => setFormData({ ...formData, firstName: e.target.value })}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Chris"
+                  placeholder="Calvin"
                 />
               </div>
               <div>
@@ -105,7 +105,7 @@ export default function Home() {
                   value={formData.lastName}
                   onChange={e => setFormData({ ...formData, lastName: e.target.value })}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Danilo"
+                  placeholder="Hobbes"
                 />
               </div>
             </div>

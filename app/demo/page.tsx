@@ -4,10 +4,10 @@ import { useState } from "react";
 import Link from "next/link";
 
 const MOCK_PROFILE = {
-  first_name: "Chris",
-  last_name: "Danilo",
-  email: "chris@example.com",
-  forwarding_address: "chris4821@usebrief.me",
+  first_name: "Calvin",
+  last_name: "Hobbes",
+  email: "calvin@example.com",
+  forwarding_address: "calvin4821@usebrief.me",
   digest_time: "21:00:00",
   is_active: true,
 };
