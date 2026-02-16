@@ -155,6 +155,12 @@ export default function Home() {
             >
               {loading ? "Creating account..." : "Create account"}
             </button>
+            <p className="text-xs text-gray-400 text-center leading-relaxed">
+              Digests are summarized by{" "}
+              <span className="font-medium text-gray-500">Claude AI by Anthropic</span>.
+              Your newsletter content is sent to Anthropic to generate summaries.
+              We never sell or share your data with anyone else.
+            </p>
           </form>
 
           <p className="mt-4 text-center text-sm text-gray-500">
@@ -333,8 +339,13 @@ export default function Home() {
         </button>
       </section>
 
-      <footer className="text-center py-8 text-sm text-gray-400 border-t">
-        © {new Date().getFullYear()} NewsletterRollup. All rights reserved.
+      <footer className="text-center py-8 text-sm text-gray-400 border-t space-y-1">
+        <p>© {new Date().getFullYear()} NewsletterRollup. All rights reserved.</p>
+        <p className="text-xs">
+          Summaries powered by{" "}
+          <span className="font-medium">Claude AI by Anthropic</span>.
+          Your data is never sold or shared.
+        </p>
       </footer>
     </div>
   );

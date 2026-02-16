@@ -24,6 +24,28 @@ function safeHref(url: string): string {
   return url;
 }
 
+/**
+ * Returns true if the user's chosen digest hour (in their timezone) matches
+ * the current UTC hour. This is called once per hour by the cron job.
+ */
+function isDigestHourForUser(profile: Profile): boolean {
+  const [digestHour] = profile.digest_time.split(":").map(Number);
+  try {
+    // Get the current hour in the user's timezone
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: profile.timezone || "America/New_York",
+      hour: "numeric",
+      hour12: false,
+    });
+    const localHour = parseInt(formatter.format(new Date()), 10);
+    // Intl returns 24 for midnight in some environments; normalise to 0
+    return (localHour === 24 ? 0 : localHour) === digestHour;
+  } catch {
+    // Unknown timezone — fall back to always running (safe default)
+    return true;
+  }
+}
+
 function buildDigestHtml(
   profile: Profile,
   newsletters: Newsletter[],
@@ -80,9 +102,12 @@ function buildDigestHtml(
         ${newsletterItems}
 
         <hr style="border: none; border-top: 1px solid #eee; margin: 32px 0 24px 0;">
-        <p style="font-size: 12px; color: #999; margin: 0;">
+        <p style="font-size: 12px; color: #999; margin: 0 0 8px 0;">
           <a href="${appUrl}/dashboard" style="color: #666; text-decoration: none;">Manage your digest settings</a>
           · <a href="${appUrl}/dashboard/settings" style="color: #666; text-decoration: none;">Unsubscribe or pause</a>
+        </p>
+        <p style="font-size: 11px; color: #bbb; margin: 0;">
+          Summaries powered by Claude AI by Anthropic. Your newsletter content is processed to generate summaries and is never sold or shared with third parties.
         </p>
       </div>
     </body>
@@ -118,9 +143,35 @@ export async function GET(request: NextRequest) {
   let skipped = 0;
   const errors: string[] = [];
 
+  // Digest date in UTC — used as the idempotency key for digest_batches
+  const digestDate = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+
   for (const profile of profiles as Profile[]) {
     try {
-      // Get unsent newsletters for this user (not blocked)
+      // Skip users whose local digest hour doesn't match the current hour
+      if (!isDigestHourForUser(profile)) {
+        skipped++;
+        continue;
+      }
+
+      // Atomically claim this digest slot — prevents double-sends on cron retry.
+      // INSERT ... ON CONFLICT DO NOTHING returns 0 rows if the batch already exists.
+      const { data: batch, error: batchError } = await supabaseAdmin
+        .from("digest_batches")
+        .insert({ user_id: profile.id, digest_date: digestDate, newsletter_ids: [] })
+        .select()
+        .single();
+
+      if (batchError) {
+        // Unique constraint violation means this digest was already sent this hour
+        if (batchError.code === "23505") {
+          skipped++;
+          continue;
+        }
+        throw batchError;
+      }
+
+      // Get blocked senders
       const { data: blockedSenders } = await supabaseAdmin
         .from("blocked_senders")
         .select("sender_email")
@@ -130,6 +181,7 @@ export async function GET(request: NextRequest) {
         (b: { sender_email: string }) => b.sender_email
       );
 
+      // Get unsent newsletters
       const { data: newsletters, error: nlError } = await supabaseAdmin
         .from("newsletters")
         .select("*")
@@ -144,6 +196,8 @@ export async function GET(request: NextRequest) {
       );
 
       if (filteredNewsletters.length === 0) {
+        // Clean up the empty batch row — no digest needed
+        await supabaseAdmin.from("digest_batches").delete().eq("id", batch.id);
         skipped++;
         continue;
       }
@@ -174,6 +228,12 @@ export async function GET(request: NextRequest) {
         .from("newsletters")
         .update({ included_in_digest: true, digest_sent_at: now })
         .in("id", newsletterIds);
+
+      // Record the newsletter IDs that went into this batch
+      await supabaseAdmin
+        .from("digest_batches")
+        .update({ newsletter_ids: newsletterIds })
+        .eq("id", batch.id);
 
       sent++;
     } catch (err) {

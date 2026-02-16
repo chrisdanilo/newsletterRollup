@@ -20,10 +20,52 @@ const DIGEST_TIMES = [
   { label: "12:00 AM", value: "00:00:00" },
 ];
 
+// Curated list of major IANA timezones with display labels
+const TIMEZONES = [
+  { label: "Pacific/Honolulu — Hawaii (UTC−10)", value: "Pacific/Honolulu" },
+  { label: "America/Anchorage — Alaska (UTC−9)", value: "America/Anchorage" },
+  { label: "America/Los_Angeles — Pacific Time (UTC−8/−7)", value: "America/Los_Angeles" },
+  { label: "America/Denver — Mountain Time (UTC−7/−6)", value: "America/Denver" },
+  { label: "America/Phoenix — Arizona (UTC−7, no DST)", value: "America/Phoenix" },
+  { label: "America/Chicago — Central Time (UTC−6/−5)", value: "America/Chicago" },
+  { label: "America/New_York — Eastern Time (UTC−5/−4)", value: "America/New_York" },
+  { label: "America/Halifax — Atlantic Time (UTC−4/−3)", value: "America/Halifax" },
+  { label: "America/St_Johns — Newfoundland (UTC−3:30/−2:30)", value: "America/St_Johns" },
+  { label: "America/Sao_Paulo — Brazil (UTC−3)", value: "America/Sao_Paulo" },
+  { label: "America/Argentina/Buenos_Aires — Argentina (UTC−3)", value: "America/Argentina/Buenos_Aires" },
+  { label: "Atlantic/Azores — Azores (UTC−1)", value: "Atlantic/Azores" },
+  { label: "Europe/London — UK (UTC+0/+1)", value: "Europe/London" },
+  { label: "Europe/Paris — Central Europe (UTC+1/+2)", value: "Europe/Paris" },
+  { label: "Europe/Helsinki — Eastern Europe (UTC+2/+3)", value: "Europe/Helsinki" },
+  { label: "Europe/Istanbul — Turkey (UTC+3)", value: "Europe/Istanbul" },
+  { label: "Asia/Dubai — Gulf (UTC+4)", value: "Asia/Dubai" },
+  { label: "Asia/Karachi — Pakistan (UTC+5)", value: "Asia/Karachi" },
+  { label: "Asia/Kolkata — India (UTC+5:30)", value: "Asia/Kolkata" },
+  { label: "Asia/Dhaka — Bangladesh (UTC+6)", value: "Asia/Dhaka" },
+  { label: "Asia/Bangkok — Indochina (UTC+7)", value: "Asia/Bangkok" },
+  { label: "Asia/Singapore — Singapore/HK (UTC+8)", value: "Asia/Singapore" },
+  { label: "Asia/Tokyo — Japan (UTC+9)", value: "Asia/Tokyo" },
+  { label: "Australia/Adelaide — SA (UTC+9:30/+10:30)", value: "Australia/Adelaide" },
+  { label: "Australia/Sydney — AEST (UTC+10/+11)", value: "Australia/Sydney" },
+  { label: "Pacific/Auckland — New Zealand (UTC+12/+13)", value: "Pacific/Auckland" },
+];
+
+function detectBrowserTimezone(): string {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    // Only return it if it's one we know about; otherwise fall back to New York
+    if (TIMEZONES.some((t) => t.value === tz)) return tz;
+  } catch { /* ignore */ }
+  return "America/New_York";
+}
+
 export default function SettingsForm({ profile }: Props) {
   const [firstName, setFirstName] = useState(profile?.first_name || "");
   const [lastName, setLastName] = useState(profile?.last_name || "");
   const [digestTime, setDigestTime] = useState(profile?.digest_time || "21:00:00");
+  const [timezone, setTimezone] = useState(
+    profile?.timezone || detectBrowserTimezone()
+  );
   const [isActive, setIsActive] = useState(profile?.is_active ?? true);
   const [loading, setLoading] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -43,6 +85,7 @@ export default function SettingsForm({ profile }: Props) {
           first_name: firstName,
           last_name: lastName,
           digest_time: digestTime,
+          timezone,
           is_active: isActive,
         })
         .eq("id", profile!.id);
@@ -77,6 +120,10 @@ export default function SettingsForm({ profile }: Props) {
       setDeleteLoading(false);
     }
   }
+
+  // Find the display label for the current digest time + timezone
+  const selectedTimeLabel = DIGEST_TIMES.find((t) => t.value === digestTime)?.label ?? digestTime;
+  const selectedTzLabel = TIMEZONES.find((t) => t.value === timezone)?.label.split(" — ")[0] ?? timezone;
 
   return (
     <div className="space-y-6">
@@ -139,22 +186,45 @@ export default function SettingsForm({ profile }: Props) {
 
         <h2 className="font-semibold text-gray-900 pt-2">Digest preferences</h2>
 
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Delivery time
-          </label>
-          <select
-            value={digestTime}
-            onChange={(e) => setDigestTime(e.target.value)}
-            className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            {DIGEST_TIMES.map((t) => (
-              <option key={t.value} value={t.value}>
-                {t.label}
-              </option>
-            ))}
-          </select>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Delivery time
+            </label>
+            <select
+              value={digestTime}
+              onChange={(e) => setDigestTime(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              {DIGEST_TIMES.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Time zone
+            </label>
+            <select
+              value={timezone}
+              onChange={(e) => setTimezone(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              {TIMEZONES.map((tz) => (
+                <option key={tz.value} value={tz.value}>
+                  {tz.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
+
+        <p className="text-xs text-gray-400 -mt-2">
+          Your digest will arrive at {selectedTimeLabel} {selectedTzLabel}.
+          Time zone was auto-detected from your browser.
+        </p>
 
         <div className="flex items-center gap-3">
           <button

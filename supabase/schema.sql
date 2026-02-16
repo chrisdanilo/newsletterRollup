@@ -6,6 +6,7 @@ CREATE TABLE public.profiles (
   last_name TEXT NOT NULL,
   forwarding_address TEXT UNIQUE NOT NULL,
   digest_time TIME DEFAULT '21:00:00',
+  timezone TEXT NOT NULL DEFAULT 'America/New_York',
   is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -21,6 +22,7 @@ CREATE TABLE public.newsletters (
   summary TEXT,
   extracted_links JSONB DEFAULT '[]'::jsonb,
   received_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  message_id TEXT,
   included_in_digest BOOLEAN DEFAULT false,
   digest_sent_at TIMESTAMP WITH TIME ZONE
 );

@@ -49,6 +49,12 @@ function parseSendGridFrom(from: string): { email: string; name: string } {
   return { name: "", email: from.trim().toLowerCase() };
 }
 
+function extractMessageId(headersRaw: string): string | null {
+  // The "headers" field from SendGrid contains raw SMTP headers as a string
+  const match = headersRaw.match(/^Message-ID:\s*<?([^>\r\n]+)>?/im);
+  return match ? match[1].trim() : null;
+}
+
 async function parseEmailBody(request: NextRequest): Promise<{
   senderEmail: string;
   senderName: string;
@@ -56,6 +62,7 @@ async function parseEmailBody(request: NextRequest): Promise<{
   htmlContent: string;
   textContent: string;
   forwardingAddress: string;
+  messageId: string | null;
 }> {
   const contentType = request.headers.get("content-type") || "";
 
@@ -77,6 +84,7 @@ async function parseEmailBody(request: NextRequest): Promise<{
       } catch { /* ignore */ }
     }
 
+    const headersRaw = formData.get("headers")?.toString() || "";
     return {
       senderEmail,
       senderName,
@@ -84,6 +92,7 @@ async function parseEmailBody(request: NextRequest): Promise<{
       htmlContent: formData.get("html")?.toString() || "",
       textContent: formData.get("text")?.toString() || "",
       forwardingAddress: forwardingAddress.toLowerCase(),
+      messageId: extractMessageId(headersRaw),
     };
   }
 
@@ -99,6 +108,7 @@ async function parseEmailBody(request: NextRequest): Promise<{
     htmlContent: (parsed.html as string) || (parsed.htmlContent as string) || "",
     textContent: (parsed.text as string) || (parsed.textContent as string) || (parsed.plain as string) || "",
     forwardingAddress: (parsed.to as { email?: string })?.email || (parsed.recipient as string) || (parsed.to as string) || "",
+    messageId: (parsed.messageId as string) || null,
   };
 }
 
@@ -112,7 +122,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { senderEmail, senderName, subject, htmlContent, textContent, forwardingAddress } =
+  const { senderEmail, senderName, subject, htmlContent, textContent, forwardingAddress, messageId } =
     await parseEmailBody(request);
 
   if (!senderEmail || !forwardingAddress) {
@@ -137,7 +147,10 @@ export async function POST(request: NextRequest) {
   const rawContent = (htmlContent || textContent).slice(0, MAX_CONTENT_BYTES);
   const extractedLinks = htmlContent ? extractLinks(htmlContent) : [];
 
-  // Store newsletter in database
+  // Store newsletter in database.
+  // The DB trigger will reject this if the user has received >= 50 newsletters
+  // in the last 24 hours (rate limit enforced at DB layer).
+  // The unique index on (user_id, message_id) silently deduplicates replays.
   const { data: newsletter, error: insertError } = await supabaseAdmin
     .from("newsletters")
     .insert({
@@ -147,11 +160,20 @@ export async function POST(request: NextRequest) {
       subject,
       raw_content: rawContent,
       extracted_links: extractedLinks,
+      message_id: messageId || null,
     })
     .select()
     .single();
 
   if (insertError) {
+    // Duplicate message_id — already processed, tell SendGrid it succeeded
+    if (insertError.code === "23505") {
+      return NextResponse.json({ success: true, duplicate: true }, { status: 200 });
+    }
+    // Rate limit exceeded
+    if (insertError.message?.includes("Rate limit exceeded")) {
+      return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
+    }
     console.error("Failed to insert newsletter:", insertError);
     return NextResponse.json({ error: "Failed to store email" }, { status: 500 });
   }
