@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import CopyButton from "@/components/CopyButton";
+import { formatDigestTime } from "@/lib/formatting";
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -58,14 +59,7 @@ export default async function DashboardPage() {
       })
     : "Never";
 
-  // Format digest time for display (profile stores "HH:MM:SS")
-  const digestHour = profile?.digest_time?.slice(0, 5) ?? "21:00";
-  const [h] = digestHour.split(":").map(Number);
-  const digestTimeLabel =
-    h === 0 ? "12:00 AM" :
-    h < 12  ? `${h}:00 AM` :
-    h === 12 ? "12:00 PM" :
-    `${h - 12}:00 PM`;
+  const digestTimeLabel = formatDigestTime(profile?.digest_time ?? "21:00:00");
 
   const isFirstTime = !totalNewsletters || totalNewsletters === 0;
 

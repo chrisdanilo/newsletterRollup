@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import Anthropic from "@anthropic-ai/sdk";
 import { ExtractedLink } from "@/types/database";
+import { summarizeNewsletter, MAX_CONTENT_BYTES, MAX_LINKS } from "@/lib/summarize";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +42,7 @@ function extractLinks(html: string): ExtractedLink[] {
     links.push({ url, text: text.slice(0, 200) });
   }
 
-  return links.slice(0, 20);
+  return links.slice(0, MAX_LINKS);
 }
 
 function parseSendGridFrom(from: string): { email: string; name: string } {
@@ -112,72 +112,6 @@ async function parseEmailBody(request: NextRequest): Promise<{
   };
 }
 
-async function summarize(
-  newsletterId: string,
-  subject: string,
-  rawContent: string,
-  existingLinks: ExtractedLink[]
-): Promise<{ summary: string; links: ExtractedLink[]; status: "done" | "failed" }> {
-  const cleanContent = rawContent
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 8000);
-
-  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
-
-  try {
-    const message = await anthropic.messages.create({
-      model: "claude-sonnet-4-5",
-      max_tokens: 1000,
-      system: "You summarize newsletters. Always respond with valid JSON only — no prose, no markdown, no code fences.",
-      messages: [
-        {
-          role: "user",
-          content: `Summarize this newsletter for a busy reader in 1-3 concise sentences. Extract meaningful article/resource URLs (skip unsubscribe and tracking links).
-
-Subject: ${subject}
-
-Content:
-${cleanContent}
-
-Respond with this exact JSON shape:
-{"summary":"...","extracted_links":[{"url":"https://...","text":"..."}]}`,
-        },
-      ],
-    });
-
-    const responseText = message.content[0].type === "text" ? message.content[0].text : "";
-    let result: { summary: string; extracted_links: { url: string; text: string }[] };
-
-    try {
-      result = JSON.parse(responseText);
-    } catch {
-      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        result = JSON.parse(jsonMatch[0]);
-      } else {
-        throw new Error("Could not parse AI response as JSON");
-      }
-    }
-
-    // Merge AI-extracted links with HTML-extracted links, deduplicated
-    const merged = [...existingLinks];
-    for (const aiLink of (result.extracted_links || [])) {
-      if (!merged.some((l) => l.url === aiLink.url)) {
-        merged.push(aiLink);
-      }
-    }
-
-    return { summary: result.summary, links: merged.slice(0, 20), status: "done" };
-  } catch (err) {
-    console.error(`Summarization failed for newsletter ${newsletterId}:`, err);
-    return { summary: "", links: existingLinks, status: "failed" };
-  }
-}
-
 export async function POST(request: NextRequest) {
   // Verify webhook secret via headers only — never accept secrets in query params
   // because query strings appear in server logs, CDN logs, and referrer headers.
@@ -209,7 +143,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
-  const MAX_CONTENT_BYTES = 500_000; // 500 KB
   const rawContent = (htmlContent || textContent).slice(0, MAX_CONTENT_BYTES);
   const extractedLinks = htmlContent ? extractLinks(htmlContent) : [];
 
@@ -243,7 +176,7 @@ export async function POST(request: NextRequest) {
 
   // Summarize synchronously. The newsletter row is always in a known state
   // when this handler returns — never stuck in 'pending' due to a lost async call.
-  const { summary, links, status } = await summarize(
+  const { summary, links, status } = await summarizeNewsletter(
     newsletter.id,
     subject,
     rawContent,

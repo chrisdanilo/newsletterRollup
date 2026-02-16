@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@supabase/supabase-js";
+import { summarizeNewsletter } from "@/lib/summarize";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +23,6 @@ export async function POST(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
-  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 
   const { data: newsletter, error: fetchError } = await supabaseAdmin
     .from("newsletters")
@@ -40,70 +39,25 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, skipped: true });
   }
 
-  const cleanContent = newsletter.raw_content
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 8000);
+  const { summary, links, status } = await summarizeNewsletter(
+    newsletter.id,
+    newsletter.subject,
+    newsletter.raw_content,
+    newsletter.extracted_links || []
+  );
 
-  try {
-    const message = await anthropic.messages.create({
-      model: "claude-sonnet-4-5",
-      max_tokens: 1000,
-      system: "You summarize newsletters. Always respond with valid JSON only — no prose, no markdown, no code fences.",
-      messages: [
-        {
-          role: "user",
-          content: `Summarize this newsletter for a busy reader in 1-3 concise sentences. Extract meaningful article/resource URLs (skip unsubscribe and tracking links).
-
-Subject: ${newsletter.subject}
-
-Content:
-${cleanContent}
-
-Respond with this exact JSON shape:
-{"summary":"...","extracted_links":[{"url":"https://...","text":"..."}]}`,
-        },
-      ],
-    });
-
-    const responseText = message.content[0].type === "text" ? message.content[0].text : "";
-
-    let result: { summary: string; extracted_links: { url: string; text: string }[] };
-    try {
-      result = JSON.parse(responseText);
-    } catch {
-      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        result = JSON.parse(jsonMatch[0]);
-      } else {
-        throw new Error("Failed to parse AI response as JSON");
-      }
-    }
-
-    const existingLinks = newsletter.extracted_links || [];
-    const merged = [...existingLinks];
-    for (const aiLink of (result.extracted_links || [])) {
-      if (!merged.some((l: { url: string }) => l.url === aiLink.url)) {
-        merged.push(aiLink);
-      }
-    }
-
+  if (status === "done") {
     await supabaseAdmin
       .from("newsletters")
       .update({
-        summary: result.summary,
-        extracted_links: merged.slice(0, 20),
+        summary,
+        extracted_links: links,
         summarization_status: "done",
       })
       .eq("id", newsletterId);
 
-    return NextResponse.json({ success: true, summary: result.summary });
-  } catch (err) {
-    console.error("Summarization retry failed:", err);
-
+    return NextResponse.json({ success: true, summary });
+  } else {
     await supabaseAdmin
       .from("newsletters")
       .update({ summarization_status: "failed" })

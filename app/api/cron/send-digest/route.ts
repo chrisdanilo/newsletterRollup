@@ -154,24 +154,9 @@ export async function GET(request: NextRequest) {
         continue;
       }
 
-      // Atomically claim this digest slot — prevents double-sends on cron retry.
-      // INSERT ... ON CONFLICT DO NOTHING returns 0 rows if the batch already exists.
-      const { data: batch, error: batchError } = await supabaseAdmin
-        .from("digest_batches")
-        .insert({ user_id: profile.id, digest_date: digestDate, newsletter_ids: [] })
-        .select()
-        .single();
-
-      if (batchError) {
-        // Unique constraint violation means this digest was already sent this hour
-        if (batchError.code === "23505") {
-          skipped++;
-          continue;
-        }
-        throw batchError;
-      }
-
-      // Get blocked senders
+      // Check whether there is anything to send before claiming the batch slot.
+      // This avoids the insert-then-delete pattern for empty digests, which
+      // could leave a dangling row if an error occurs between insert and delete.
       const { data: blockedSenders } = await supabaseAdmin
         .from("blocked_senders")
         .select("sender_email")
@@ -196,10 +181,25 @@ export async function GET(request: NextRequest) {
       );
 
       if (filteredNewsletters.length === 0) {
-        // Clean up the empty batch row — no digest needed
-        await supabaseAdmin.from("digest_batches").delete().eq("id", batch.id);
         skipped++;
         continue;
+      }
+
+      // Atomically claim this digest slot — prevents double-sends on cron retry.
+      // Only insert the batch row once we know there is content to send.
+      const { data: batch, error: batchError } = await supabaseAdmin
+        .from("digest_batches")
+        .insert({ user_id: profile.id, digest_date: digestDate, newsletter_ids: [] })
+        .select()
+        .single();
+
+      if (batchError) {
+        // Unique constraint violation means this digest was already sent this hour
+        if (batchError.code === "23505") {
+          skipped++;
+          continue;
+        }
+        throw batchError;
       }
 
       const html = buildDigestHtml(profile, filteredNewsletters, appUrl);
