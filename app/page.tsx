@@ -34,7 +34,7 @@ export default function Home() {
       // Generate forwarding address
       const random4 = Math.floor(1000 + Math.random() * 9000).toString();
       const forwardingAddress = `${formData.firstName.toLowerCase()}${random4}@${
-        process.env.NEXT_PUBLIC_APP_DOMAIN || "newsletterrollup.com"
+        process.env.NEXT_PUBLIC_APP_DOMAIN || "usebrief.me"
       }`;
 
       const { error: profileError } = await supabase.from("profiles").insert({
@@ -256,7 +256,7 @@ export default function Home() {
             {
               step: "1",
               title: "Create your account",
-              desc: "Sign up in seconds and get a unique forwarding email address like chris1234@newsletterrollup.com.",
+              desc: "Sign up in seconds and get a unique forwarding email address like chris1234@usebrief.me.",
             },
             {
               step: "2",
