@@ -104,7 +104,8 @@ async function parseEmailBody(request: NextRequest): Promise<{
 
 export async function POST(request: NextRequest) {
   // Verify webhook secret
-  const secret = request.headers.get("x-webhook-secret") ||
+  const secret = request.nextUrl.searchParams.get("secret") ||
+    request.headers.get("x-webhook-secret") ||
     request.headers.get("authorization")?.replace("Bearer ", "");
 
   if (secret !== process.env.EMAIL_WEBHOOK_SECRET) {
