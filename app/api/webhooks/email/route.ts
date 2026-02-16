@@ -133,7 +133,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
-  const rawContent = htmlContent || textContent;
+  const MAX_CONTENT_BYTES = 500_000; // 500 KB
+  const rawContent = (htmlContent || textContent).slice(0, MAX_CONTENT_BYTES);
   const extractedLinks = htmlContent ? extractLinks(htmlContent) : [];
 
   // Store newsletter in database

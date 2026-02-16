@@ -12,6 +12,17 @@ export async function POST(req: NextRequest) {
 
     const supabase = await createAdminClient();
 
+    // Verify the user ID corresponds to a real auth user before inserting
+    const { data: authUser, error: authLookupError } = await supabase.auth.admin.getUserById(id);
+    if (authLookupError || !authUser?.user) {
+      return NextResponse.json({ error: "Invalid user" }, { status: 403 });
+    }
+
+    // Ensure the email matches what Supabase auth has for this user
+    if (authUser.user.email?.toLowerCase() !== email.toLowerCase()) {
+      return NextResponse.json({ error: "Invalid user" }, { status: 403 });
+    }
+
     const { error } = await supabase.from("profiles").insert({
       id,
       email,

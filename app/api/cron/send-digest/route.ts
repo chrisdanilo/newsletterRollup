@@ -5,6 +5,25 @@ import { Profile, Newsletter, ExtractedLink } from "@/types/database";
 
 export const dynamic = "force-dynamic";
 
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function safeHref(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return "#";
+  } catch {
+    return "#";
+  }
+  return url;
+}
+
 function buildDigestHtml(
   profile: Profile,
   newsletters: Newsletter[],
@@ -20,7 +39,7 @@ function buildDigestHtml(
             .slice(0, 5)
             .map(
               (l) =>
-                `<a href="${l.url}" style="color: #0066cc; font-size: 13px; display: block; margin-bottom: 4px; text-decoration: none;">→ ${l.text}</a>`
+                `<a href="${escapeHtml(safeHref(l.url))}" style="color: #0066cc; font-size: 13px; display: block; margin-bottom: 4px; text-decoration: none;">→ ${escapeHtml(l.text)}</a>`
             )
             .join("")}
         </div>`
@@ -29,14 +48,14 @@ function buildDigestHtml(
       return `
       <div style="border-left: 3px solid #0066cc; padding-left: 16px; margin: 24px 0;">
         <h3 style="margin: 0 0 4px 0; font-size: 16px; color: #1a1a1a;">
-          ${nl.sender_name || nl.sender_email}
+          ${escapeHtml(nl.sender_name || nl.sender_email)}
         </h3>
-        <p style="margin: 0 0 8px 0; color: #666; font-size: 13px;">${nl.subject}</p>
+        <p style="margin: 0 0 8px 0; color: #666; font-size: 13px;">${escapeHtml(nl.subject)}</p>
         <p style="margin: 0; color: #333; font-size: 15px; line-height: 1.5;">
-          ${nl.summary || nl.subject}
+          ${escapeHtml(nl.summary || nl.subject)}
         </p>
         ${linksHtml}
-        <a href="${appUrl}/newsletters/${nl.id}" style="display: inline-block; margin-top: 10px; color: #0066cc; font-size: 13px; text-decoration: none;">
+        <a href="${escapeHtml(appUrl)}/newsletters/${escapeHtml(nl.id)}" style="display: inline-block; margin-top: 10px; color: #0066cc; font-size: 13px; text-decoration: none;">
           Read full email →
         </a>
       </div>`;
@@ -135,11 +154,16 @@ export async function GET(request: NextRequest) {
           ? `Your digest: ${filteredNewsletters[0].subject}`
           : `Your digest: ${filteredNewsletters.length} newsletters for ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
 
+      const settingsUrl = `${appUrl}/dashboard/settings`;
       await sgMail.send({
         from: `digest@${process.env.NEXT_PUBLIC_APP_DOMAIN || "usebrief.me"}`,
         to: profile.email,
         subject,
         html,
+        headers: {
+          "List-Unsubscribe": `<${settingsUrl}>`,
+          "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        },
       });
 
       // Mark newsletters as sent

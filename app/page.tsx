@@ -56,8 +56,15 @@ export default function Home() {
         throw new Error(error || "Failed to create profile");
       }
 
-      toast.success("Account created! Check your email to verify.");
-      router.push("/dashboard");
+      if (authData.session) {
+        // Email confirmation disabled — user is logged in immediately
+        toast.success("Account created! Welcome aboard.");
+        router.push("/dashboard");
+      } else {
+        // Email confirmation required — session not active yet
+        toast.success("Account created! Check your email to confirm your address before signing in.");
+        setMode("login");
+      }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Signup failed");
     } finally {
