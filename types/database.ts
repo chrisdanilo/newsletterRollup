@@ -18,6 +18,7 @@ export interface Newsletter {
   subject: string
   raw_content: string
   summary: string | null
+  summarization_status: 'pending' | 'done' | 'failed'
   extracted_links: ExtractedLink[]
   message_id: string | null
   received_at: string

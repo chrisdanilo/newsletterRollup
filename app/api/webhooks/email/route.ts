@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import Anthropic from "@anthropic-ai/sdk";
 import { ExtractedLink } from "@/types/database";
 
 export const dynamic = "force-dynamic";
+
+// Vercel Pro/Hobby max is 60s / 10s respectively. Claude usually responds in
+// 3-8s. We set a 15s timeout so we fail fast and mark status='failed' rather
+// than leaving the row in 'pending' forever.
+export const maxDuration = 15;
 
 function getSupabaseAdmin() {
   return createClient(
@@ -20,7 +26,6 @@ function extractLinks(html: string): ExtractedLink[] {
     const url = match[1];
     const text = match[2].replace(/<[^>]+>/g, "").trim();
 
-    // Skip unsubscribe links, tracking pixels, and empty URLs
     if (
       !url ||
       url.startsWith("mailto:") ||
@@ -37,11 +42,10 @@ function extractLinks(html: string): ExtractedLink[] {
     links.push({ url, text: text.slice(0, 200) });
   }
 
-  return links.slice(0, 20); // max 20 links
+  return links.slice(0, 20);
 }
 
 function parseSendGridFrom(from: string): { email: string; name: string } {
-  // SendGrid from field is like "Name <email@example.com>" or just "email@example.com"
   const match = from.match(/^(.*?)\s*<([^>]+)>\s*$/);
   if (match) {
     return { name: match[1].trim(), email: match[2].trim().toLowerCase() };
@@ -50,7 +54,6 @@ function parseSendGridFrom(from: string): { email: string; name: string } {
 }
 
 function extractMessageId(headersRaw: string): string | null {
-  // The "headers" field from SendGrid contains raw SMTP headers as a string
   const match = headersRaw.match(/^Message-ID:\s*<?([^>\r\n]+)>?/im);
   return match ? match[1].trim() : null;
 }
@@ -66,13 +69,11 @@ async function parseEmailBody(request: NextRequest): Promise<{
 }> {
   const contentType = request.headers.get("content-type") || "";
 
-  // SendGrid Inbound Parse sends multipart/form-data
   if (contentType.includes("multipart/form-data")) {
     const formData = await request.formData();
     const from = formData.get("from")?.toString() || "";
     const { email: senderEmail, name: senderName } = parseSendGridFrom(from);
 
-    // SendGrid puts the recipient in "to" or the envelope JSON
     let forwardingAddress = formData.get("to")?.toString() || "";
     const envelope = formData.get("envelope")?.toString();
     if (envelope) {
@@ -96,7 +97,6 @@ async function parseEmailBody(request: NextRequest): Promise<{
     };
   }
 
-  // Fallback: JSON body (other providers)
   const body = await request.text();
   let parsed: Record<string, unknown> = {};
   try { parsed = JSON.parse(body); } catch { /* ignore */ }
@@ -112,9 +112,76 @@ async function parseEmailBody(request: NextRequest): Promise<{
   };
 }
 
+async function summarize(
+  newsletterId: string,
+  subject: string,
+  rawContent: string,
+  existingLinks: ExtractedLink[]
+): Promise<{ summary: string; links: ExtractedLink[]; status: "done" | "failed" }> {
+  const cleanContent = rawContent
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 8000);
+
+  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
+
+  try {
+    const message = await anthropic.messages.create({
+      model: "claude-sonnet-4-5",
+      max_tokens: 1000,
+      system: "You summarize newsletters. Always respond with valid JSON only — no prose, no markdown, no code fences.",
+      messages: [
+        {
+          role: "user",
+          content: `Summarize this newsletter for a busy reader in 1-3 concise sentences. Extract meaningful article/resource URLs (skip unsubscribe and tracking links).
+
+Subject: ${subject}
+
+Content:
+${cleanContent}
+
+Respond with this exact JSON shape:
+{"summary":"...","extracted_links":[{"url":"https://...","text":"..."}]}`,
+        },
+      ],
+    });
+
+    const responseText = message.content[0].type === "text" ? message.content[0].text : "";
+    let result: { summary: string; extracted_links: { url: string; text: string }[] };
+
+    try {
+      result = JSON.parse(responseText);
+    } catch {
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        result = JSON.parse(jsonMatch[0]);
+      } else {
+        throw new Error("Could not parse AI response as JSON");
+      }
+    }
+
+    // Merge AI-extracted links with HTML-extracted links, deduplicated
+    const merged = [...existingLinks];
+    for (const aiLink of (result.extracted_links || [])) {
+      if (!merged.some((l) => l.url === aiLink.url)) {
+        merged.push(aiLink);
+      }
+    }
+
+    return { summary: result.summary, links: merged.slice(0, 20), status: "done" };
+  } catch (err) {
+    console.error(`Summarization failed for newsletter ${newsletterId}:`, err);
+    return { summary: "", links: existingLinks, status: "failed" };
+  }
+}
+
 export async function POST(request: NextRequest) {
-  // Verify webhook secret
-  const secret = request.nextUrl.searchParams.get("secret") ||
+  // Verify webhook secret via headers only — never accept secrets in query params
+  // because query strings appear in server logs, CDN logs, and referrer headers.
+  const secret =
     request.headers.get("x-webhook-secret") ||
     request.headers.get("authorization")?.replace("Bearer ", "");
 
@@ -131,7 +198,6 @@ export async function POST(request: NextRequest) {
 
   const supabaseAdmin = getSupabaseAdmin();
 
-  // Look up user by forwarding address
   const { data: profile, error: profileError } = await supabaseAdmin
     .from("profiles")
     .select("id")
@@ -147,10 +213,8 @@ export async function POST(request: NextRequest) {
   const rawContent = (htmlContent || textContent).slice(0, MAX_CONTENT_BYTES);
   const extractedLinks = htmlContent ? extractLinks(htmlContent) : [];
 
-  // Store newsletter in database.
-  // The DB trigger will reject this if the user has received >= 50 newsletters
-  // in the last 24 hours (rate limit enforced at DB layer).
-  // The unique index on (user_id, message_id) silently deduplicates replays.
+  // Insert newsletter with status='pending'. The DB trigger enforces the
+  // 50/24h rate limit; the unique index on (user_id, message_id) deduplicates.
   const { data: newsletter, error: insertError } = await supabaseAdmin
     .from("newsletters")
     .insert({
@@ -161,16 +225,15 @@ export async function POST(request: NextRequest) {
       raw_content: rawContent,
       extracted_links: extractedLinks,
       message_id: messageId || null,
+      summarization_status: "pending",
     })
     .select()
     .single();
 
   if (insertError) {
-    // Duplicate message_id — already processed, tell SendGrid it succeeded
     if (insertError.code === "23505") {
       return NextResponse.json({ success: true, duplicate: true }, { status: 200 });
     }
-    // Rate limit exceeded
     if (insertError.message?.includes("Rate limit exceeded")) {
       return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
     }
@@ -178,17 +241,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Failed to store email" }, { status: 500 });
   }
 
-  // Trigger summarization in background (fire and forget)
-  if (newsletter) {
-    fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/summarize`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-internal-secret": process.env.EMAIL_WEBHOOK_SECRET!,
-      },
-      body: JSON.stringify({ newsletterId: newsletter.id }),
-    }).catch(err => console.error("Failed to trigger summarization:", err));
-  }
+  // Summarize synchronously. The newsletter row is always in a known state
+  // when this handler returns — never stuck in 'pending' due to a lost async call.
+  const { summary, links, status } = await summarize(
+    newsletter.id,
+    subject,
+    rawContent,
+    extractedLinks
+  );
+
+  await supabaseAdmin
+    .from("newsletters")
+    .update({
+      summary: summary || null,
+      extracted_links: links,
+      summarization_status: status,
+    })
+    .eq("id", newsletter.id);
 
   return NextResponse.json({ success: true }, { status: 200 });
 }

@@ -17,6 +17,14 @@ export default function RootLayout({
       <body className="antialiased">
         {children}
         <Toaster position="top-right" />
+        {/* Screen reader live region — toast messages are announced here */}
+        <div
+          id="sr-announcer"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          className="sr-only"
+        />
       </body>
     </html>
   );

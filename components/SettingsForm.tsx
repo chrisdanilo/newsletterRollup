@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Profile } from "@/types/database";
@@ -70,6 +70,40 @@ export default function SettingsForm({ profile }: Props) {
   const [loading, setLoading] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const modalRef = useRef<HTMLDivElement>(null);
+
+  // Trap focus inside the modal and close on Escape
+  useEffect(() => {
+    if (!showDeleteModal) return;
+
+    const focusable = modalRef.current?.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    const first = focusable?.[0];
+    const last = focusable?.[focusable.length - 1];
+    first?.focus();
+
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setShowDeleteModal(false);
+      } else if (e.key === "Tab" && focusable && focusable.length > 0) {
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            e.preventDefault();
+            last?.focus();
+          }
+        } else {
+          if (document.activeElement === last) {
+            e.preventDefault();
+            first?.focus();
+          }
+        }
+      }
+    }
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [showDeleteModal]);
 
   const supabase = createClient();
   const router = useRouter();
@@ -231,6 +265,7 @@ export default function SettingsForm({ profile }: Props) {
             type="button"
             role="switch"
             aria-checked={isActive}
+            aria-label={isActive ? "Digest active — click to pause" : "Digest paused — click to activate"}
             onClick={() => setIsActive(!isActive)}
             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
               isActive ? "bg-blue-600" : "bg-gray-300"
@@ -280,8 +315,14 @@ export default function SettingsForm({ profile }: Props) {
       {/* Delete confirmation modal */}
       {showDeleteModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-8 max-w-sm w-full shadow-2xl">
-            <h3 className="text-xl font-bold text-gray-900 mb-2">
+          <div
+            ref={modalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-modal-title"
+            className="bg-white rounded-2xl p-8 max-w-sm w-full shadow-2xl"
+          >
+            <h3 id="delete-modal-title" className="text-xl font-bold text-gray-900 mb-2">
               Delete your account?
             </h3>
             <p className="text-gray-500 text-sm mb-6">

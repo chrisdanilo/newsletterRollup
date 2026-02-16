@@ -4,6 +4,9 @@ import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 
+// This route is a retry endpoint for newsletters whose summarization_status
+// is 'pending' or 'failed'. The primary path is now synchronous inside the
+// email webhook handler.
 export async function POST(request: NextRequest) {
   const secret = request.headers.get("x-internal-secret");
   if (secret !== process.env.EMAIL_WEBHOOK_SECRET) {
@@ -32,38 +35,36 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Newsletter not found" }, { status: 404 });
   }
 
-  // Strip HTML for cleaner summarization input
+  // Only retry newsletters that haven't successfully summarized
+  if (newsletter.summarization_status === "done") {
+    return NextResponse.json({ success: true, skipped: true });
+  }
+
   const cleanContent = newsletter.raw_content
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
     .trim()
-    .slice(0, 8000); // limit to 8k chars
+    .slice(0, 8000);
 
   try {
     const message = await anthropic.messages.create({
       model: "claude-sonnet-4-5",
       max_tokens: 1000,
+      system: "You summarize newsletters. Always respond with valid JSON only — no prose, no markdown, no code fences.",
       messages: [
         {
           role: "user",
-          content: `You are summarizing a newsletter for a busy executive. Extract the key insights in 1-3 concise sentences. Focus on actionable information, trends, or important updates. Also extract all meaningful URLs from the content (articles, reports, resources - not unsubscribe links or tracking pixels).
+          content: `Summarize this newsletter for a busy reader in 1-3 concise sentences. Extract meaningful article/resource URLs (skip unsubscribe and tracking links).
 
-Newsletter subject: ${newsletter.subject}
-Newsletter content:
+Subject: ${newsletter.subject}
+
+Content:
 ${cleanContent}
 
-Return JSON format:
-{
-  "summary": "1-3 sentence summary here",
-  "extracted_links": [
-    {"url": "https://...", "text": "Link description"},
-    ...
-  ]
-}
-
-Return only valid JSON, no other text.`,
+Respond with this exact JSON shape:
+{"summary":"...","extracted_links":[{"url":"https://...","text":"..."}]}`,
         },
       ],
     });
@@ -74,7 +75,6 @@ Return only valid JSON, no other text.`,
     try {
       result = JSON.parse(responseText);
     } catch {
-      // Try to extract JSON from the response
       const jsonMatch = responseText.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         result = JSON.parse(jsonMatch[0]);
@@ -83,37 +83,30 @@ Return only valid JSON, no other text.`,
       }
     }
 
-    // Merge AI-extracted links with webhook-extracted links
     const existingLinks = newsletter.extracted_links || [];
-    const aiLinks = result.extracted_links || [];
-    const mergedLinks = [...existingLinks];
-
-    for (const aiLink of aiLinks) {
-      if (!mergedLinks.some((l: { url: string }) => l.url === aiLink.url)) {
-        mergedLinks.push(aiLink);
+    const merged = [...existingLinks];
+    for (const aiLink of (result.extracted_links || [])) {
+      if (!merged.some((l: { url: string }) => l.url === aiLink.url)) {
+        merged.push(aiLink);
       }
     }
 
-    const { error: updateError } = await supabaseAdmin
+    await supabaseAdmin
       .from("newsletters")
       .update({
         summary: result.summary,
-        extracted_links: mergedLinks.slice(0, 20),
+        extracted_links: merged.slice(0, 20),
+        summarization_status: "done",
       })
       .eq("id", newsletterId);
 
-    if (updateError) {
-      console.error("Failed to update newsletter with summary:", updateError);
-      return NextResponse.json({ error: "Failed to save summary" }, { status: 500 });
-    }
-
     return NextResponse.json({ success: true, summary: result.summary });
   } catch (err) {
-    console.error("Summarization failed:", err);
-    // Store a fallback summary so the newsletter still appears in digest
+    console.error("Summarization retry failed:", err);
+
     await supabaseAdmin
       .from("newsletters")
-      .update({ summary: `${newsletter.subject} (Summary unavailable)` })
+      .update({ summarization_status: "failed" })
       .eq("id", newsletterId);
 
     return NextResponse.json({ error: "Summarization failed" }, { status: 500 });
