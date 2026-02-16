@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { Resend } from "resend";
+import sgMail from "@sendgrid/mail";
 import { Profile, Newsletter, ExtractedLink } from "@/types/database";
 
 export const dynamic = "force-dynamic";
@@ -82,7 +82,7 @@ export async function GET(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
-  const resend = new Resend(process.env.RESEND_API_KEY);
+  sgMail.setApiKey(process.env.SENDGRID_API_KEY!);
 
   // Get all active users
   const { data: profiles, error: profilesError } = await supabaseAdmin
@@ -135,8 +135,8 @@ export async function GET(request: NextRequest) {
           ? `Your digest: ${filteredNewsletters[0].subject}`
           : `Your digest: ${filteredNewsletters.length} newsletters for ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
 
-      await resend.emails.send({
-        from: `NewsletterRollup <digest@${process.env.NEXT_PUBLIC_APP_DOMAIN || "newsletterrollup.com"}>`,
+      await sgMail.send({
+        from: `digest@${process.env.NEXT_PUBLIC_APP_DOMAIN || "usebrief.me"}`,
         to: profile.email,
         subject,
         html,

@@ -40,29 +40,65 @@ function extractLinks(html: string): ExtractedLink[] {
   return links.slice(0, 20); // max 20 links
 }
 
-function parseEmailBody(body: string): {
+function parseSendGridFrom(from: string): { email: string; name: string } {
+  // SendGrid from field is like "Name <email@example.com>" or just "email@example.com"
+  const match = from.match(/^(.*?)\s*<([^>]+)>\s*$/);
+  if (match) {
+    return { name: match[1].trim(), email: match[2].trim().toLowerCase() };
+  }
+  return { name: "", email: from.trim().toLowerCase() };
+}
+
+async function parseEmailBody(request: NextRequest): Promise<{
   senderEmail: string;
   senderName: string;
   subject: string;
   htmlContent: string;
   textContent: string;
   forwardingAddress: string;
-} {
-  // Parse JSON body from email service (Cloudflare Email Routing / SendGrid / Resend inbound)
-  let parsed;
-  try {
-    parsed = JSON.parse(body);
-  } catch {
-    parsed = {};
+}> {
+  const contentType = request.headers.get("content-type") || "";
+
+  // SendGrid Inbound Parse sends multipart/form-data
+  if (contentType.includes("multipart/form-data")) {
+    const formData = await request.formData();
+    const from = formData.get("from")?.toString() || "";
+    const { email: senderEmail, name: senderName } = parseSendGridFrom(from);
+
+    // SendGrid puts the recipient in "to" or the envelope JSON
+    let forwardingAddress = formData.get("to")?.toString() || "";
+    const envelope = formData.get("envelope")?.toString();
+    if (envelope) {
+      try {
+        const env = JSON.parse(envelope);
+        if (Array.isArray(env.to) && env.to.length > 0) {
+          forwardingAddress = env.to[0];
+        }
+      } catch { /* ignore */ }
+    }
+
+    return {
+      senderEmail,
+      senderName,
+      subject: formData.get("subject")?.toString() || "(No Subject)",
+      htmlContent: formData.get("html")?.toString() || "",
+      textContent: formData.get("text")?.toString() || "",
+      forwardingAddress: forwardingAddress.toLowerCase(),
+    };
   }
 
+  // Fallback: JSON body (other providers)
+  const body = await request.text();
+  let parsed: Record<string, unknown> = {};
+  try { parsed = JSON.parse(body); } catch { /* ignore */ }
+
   return {
-    senderEmail: parsed.from?.email || parsed.sender || parsed.from || "",
-    senderName: parsed.from?.name || parsed.fromName || "",
-    subject: parsed.subject || "(No Subject)",
-    htmlContent: parsed.html || parsed.htmlContent || "",
-    textContent: parsed.text || parsed.textContent || parsed.plain || "",
-    forwardingAddress: parsed.to?.email || parsed.recipient || parsed.to || "",
+    senderEmail: (parsed.from as { email?: string })?.email || (parsed.sender as string) || (parsed.from as string) || "",
+    senderName: (parsed.from as { name?: string })?.name || (parsed.fromName as string) || "",
+    subject: (parsed.subject as string) || "(No Subject)",
+    htmlContent: (parsed.html as string) || (parsed.htmlContent as string) || "",
+    textContent: (parsed.text as string) || (parsed.textContent as string) || (parsed.plain as string) || "",
+    forwardingAddress: (parsed.to as { email?: string })?.email || (parsed.recipient as string) || (parsed.to as string) || "",
   };
 }
 
@@ -75,15 +111,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: string;
-  try {
-    body = await request.text();
-  } catch {
-    return NextResponse.json({ error: "Failed to read body" }, { status: 400 });
-  }
-
   const { senderEmail, senderName, subject, htmlContent, textContent, forwardingAddress } =
-    parseEmailBody(body);
+    await parseEmailBody(request);
 
   if (!senderEmail || !forwardingAddress) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
