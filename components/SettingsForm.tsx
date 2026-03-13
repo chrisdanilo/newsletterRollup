@@ -112,13 +112,13 @@ export default function SettingsForm({ profile }: Props) {
     setDeleteLoading(true);
 
     try {
-      // Delete profile (cascades to newsletters)
-      const { error: profileError } = await supabase
-        .from("profiles")
-        .delete()
-        .eq("id", profile!.id);
-
-      if (profileError) throw profileError;
+      // Server route deletes the auth user (which cascades to profile and all data)
+      // and requires a valid session — the client cannot self-escalate to admin.
+      const res = await fetch("/api/delete-account", { method: "DELETE" });
+      if (!res.ok) {
+        const { error } = await res.json();
+        throw new Error(error || "Failed to delete account");
+      }
 
       await supabase.auth.signOut();
       toast.success("Account deleted successfully");

@@ -112,14 +112,17 @@ async function parseEmailBody(request: NextRequest): Promise<{
   };
 }
 
-export async function POST(request: NextRequest) {
-  // Verify webhook secret via headers only — never accept secrets in query params
-  // because query strings appear in server logs, CDN logs, and referrer headers.
-  const secret =
-    request.headers.get("x-webhook-secret") ||
-    request.headers.get("authorization")?.replace("Bearer ", "");
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ token: string }> }
+) {
+  // The token is embedded in the URL path so SendGrid Inbound Parse can deliver
+  // without requiring custom request headers (which it doesn't support).
+  // The URL is transmitted over HTTPS and never appears in referrer headers.
+  // Configure SendGrid to POST to: https://yourdomain.com/api/webhooks/email/YOUR_SECRET
+  const { token } = await params;
 
-  if (secret !== process.env.EMAIL_WEBHOOK_SECRET) {
+  if (!token || token !== process.env.EMAIL_WEBHOOK_SECRET) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

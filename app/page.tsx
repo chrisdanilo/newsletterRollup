@@ -234,7 +234,7 @@ export default function Home() {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
       {/* Nav */}
       <nav className="flex items-center justify-between px-6 py-4 max-w-6xl mx-auto">
-        <div className="text-xl font-bold text-blue-700">NewsletterRollup</div>
+        <div className="text-xl font-bold text-blue-700">Brief</div>
         <button
           onClick={() => setMode("login")}
           className="text-sm font-medium text-gray-600 hover:text-gray-900"
@@ -250,7 +250,7 @@ export default function Home() {
           <span className="text-blue-600">One smart digest.</span>
         </h1>
         <p className="text-xl text-gray-600 mb-10 max-w-2xl mx-auto">
-          Stop drowning in newsletter emails. NewsletterRollup aggregates every newsletter you receive
+          Stop drowning in newsletter emails. Brief aggregates every newsletter you receive
           and delivers a single AI-summarized digest every night — so you never miss what matters.
         </p>
         <div className="flex flex-col sm:flex-row gap-4 justify-center">
@@ -278,7 +278,7 @@ export default function Home() {
             {
               step: "1",
               title: "Create your account",
-              desc: "Sign up in seconds and get a unique forwarding email address like chris1234@usebrief.me.",
+              desc: "Sign up in seconds and get a unique forwarding address like chris1234@usebrief.me.",
             },
             {
               step: "2",
@@ -330,7 +330,7 @@ export default function Home() {
       {/* CTA */}
       <section className="py-20 text-center">
         <h2 className="text-3xl font-bold text-gray-900 mb-4">Ready to reclaim your inbox?</h2>
-        <p className="text-gray-600 mb-8">Join thousands of executives who stay informed without the noise.</p>
+        <p className="text-gray-600 mb-8">Stay informed without the noise.</p>
         <button
           onClick={() => setMode("signup")}
           className="bg-blue-600 text-white px-8 py-4 rounded-xl font-bold text-lg hover:bg-blue-700 shadow-lg transition-colors"
@@ -340,7 +340,7 @@ export default function Home() {
       </section>
 
       <footer className="text-center py-8 text-sm text-gray-400 border-t space-y-1">
-        <p>© {new Date().getFullYear()} NewsletterRollup. All rights reserved.</p>
+        <p>© {new Date().getFullYear()} Brief (usebrief.me). All rights reserved.</p>
         <p className="text-xs">
           Summaries powered by{" "}
           <span className="font-medium">Claude AI by Anthropic</span>.
